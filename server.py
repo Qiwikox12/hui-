@@ -3,6 +3,7 @@ import sqlite3
 import uuid
 import time
 import os
+import urllib.parse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,6 +51,11 @@ def make_key():
     return "-".join(uuid.uuid4().hex[:4].upper() for _ in range(4))
 
 
+def linkvertise_url(dest):
+    encoded = urllib.parse.quote(dest, safe="")
+    return f"https://linkvertise.com/4260771/get-key?o=sharing&r={encoded}"
+
+
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json()
@@ -69,7 +75,7 @@ def generate():
         conn.close()
         return jsonify({
             "success": True,
-            "url": f"{SERVER_URL}/get/{existing['token']}"
+            "url": linkvertise_url(f"{SERVER_URL}/get/{existing['token']}")
         })
 
     key = make_key()
@@ -85,7 +91,7 @@ def generate():
 
     return jsonify({
         "success": True,
-        "url": f"{SERVER_URL}/get/{token}"
+        "url": linkvertise_url(f"{SERVER_URL}/get/{token}")
     })
 
 
@@ -153,13 +159,11 @@ def admin():
 
 
 PAGE = """<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Получить ключ</title>
-<script src="https://publisher.linkvertise.com/cdn/linkvertise.js"></script>
-<script>linkvertise(4260771, {whitelist: [], blacklist: [""]});</script>
+<title>Get Key</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d14;font-family:'Segoe UI',sans-serif;color:#e2e2e2}
@@ -176,22 +180,22 @@ h1{font-size:22px;margin-bottom:8px;color:#fff}
 <body>
 <div class="card">
 {% if key %}
-  <h1>🔑 Ваш ключ</h1>
-  <p class="sub">Нажмите на ключ чтобы скопировать</p>
+  <h1>🔑 Your Key</h1>
+  <p class="sub">Click the key to copy it</p>
   <div class="key" onclick="copy(this)">{{ key }}</div>
-  <p class="hint" id="h">Нажмите чтобы скопировать</p>
-  <p class="timer">⏳ Действует ещё {{ hours }}ч {{ minutes }}м</p>
+  <p class="hint" id="h">Click to copy</p>
+  <p class="timer">⏳ Expires in {{ hours }}h {{ minutes }}m</p>
 {% else %}
-  <h1>❌ Ключ не найден</h1>
-  <p class="err">Ключ недействителен или истёк.<br>Запросите новый в Discord.</p>
+  <h1>❌ Key Not Found</h1>
+  <p class="err">This key is invalid or has expired.<br>Request a new one in our Discord.</p>
 {% endif %}
 </div>
 <script>
 function copy(el){
   navigator.clipboard.writeText(el.textContent.trim());
   var h=document.getElementById('h');
-  h.textContent='✅ Скопировано!';
-  setTimeout(()=>h.textContent='Нажмите чтобы скопировать',2000);
+  h.textContent='✅ Copied!';
+  setTimeout(()=>h.textContent='Click to copy',2000);
 }
 </script>
 </body>
