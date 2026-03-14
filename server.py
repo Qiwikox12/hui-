@@ -51,11 +51,6 @@ def make_key():
     return "-".join(uuid.uuid4().hex[:4].upper() for _ in range(4))
 
 
-def linkvertise_url(dest):
-    encoded = urllib.parse.quote(dest, safe="")
-    return f"https://linkvertise.com/4260771/get-key?o=sharing&r={encoded}"
-
-
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json()
@@ -75,7 +70,7 @@ def generate():
         conn.close()
         return jsonify({
             "success": True,
-            "url": linkvertise_url(f"{SERVER_URL}/get/{existing['token']}")
+            "url": f"{SERVER_URL}/get/{existing['token']}"
         })
 
     key = make_key()
@@ -91,7 +86,7 @@ def generate():
 
     return jsonify({
         "success": True,
-        "url": linkvertise_url(f"{SERVER_URL}/get/{token}")
+        "url": f"{SERVER_URL}/get/{token}"
     })
 
 
@@ -106,11 +101,27 @@ def get_key(token):
     conn.close()
 
     if not row:
-        return render_template_string(PAGE, key=None, hours=0, minutes=0)
+        return render_template_string(ERROR_PAGE)
+
+    return render_template_string(LANDING_PAGE, token=token)
+
+
+@app.route("/reveal/<token>")
+def reveal_key(token):
+    cleanup_expired()
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM keys WHERE token=? AND expires_at>?",
+        (token, int(time.time()))
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        return render_template_string(ERROR_PAGE)
 
     remaining = row["expires_at"] - int(time.time())
     return render_template_string(
-        PAGE,
+        KEY_PAGE,
         key=row["key"],
         hours=remaining // 3600,
         minutes=(remaining % 3600) // 60
@@ -158,12 +169,42 @@ def admin():
     } for r in rows])
 
 
-PAGE = """<!DOCTYPE html>
+LANDING_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Get Key</title>
+<script src="https://publisher.linkvertise.com/cdn/linkvertise.js"></script>
+<script>linkvertise(4260771, {whitelist: [], blacklist: [""]});</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d14;font-family:'Segoe UI',sans-serif;color:#e2e2e2}
+.card{background:#16161f;border:1px solid #2a2a3d;border-radius:16px;padding:44px 52px;text-align:center;max-width:480px;width:92%}
+h1{font-size:22px;margin-bottom:8px;color:#fff}
+.sub{font-size:14px;color:#777;margin-bottom:32px}
+.btn{display:inline-block;background:#5865f2;color:#fff;text-decoration:none;font-size:16px;font-weight:600;padding:14px 36px;border-radius:10px;transition:background .15s}
+.btn:hover{background:#4752c4}
+.note{font-size:12px;color:#555;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔑 Get Your Key</h1>
+  <p class="sub">Complete a short task to receive your key.<br>It will be valid for 24 hours.</p>
+  <a class="btn" href="/reveal/{{ token }}">Get Key</a>
+  <p class="note">You will be redirected through a short verification.</p>
+</div>
+</body>
+</html>"""
+
+
+KEY_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your Key</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d14;font-family:'Segoe UI',sans-serif;color:#e2e2e2}
@@ -174,21 +215,15 @@ h1{font-size:22px;margin-bottom:8px;color:#fff}
 .key:hover{background:#13131e}
 .hint{font-size:13px;color:#555;margin-bottom:20px}
 .timer{font-size:13px;color:#f0b429}
-.err{color:#f04747;font-size:16px;margin-top:16px}
 </style>
 </head>
 <body>
 <div class="card">
-{% if key %}
   <h1>🔑 Your Key</h1>
   <p class="sub">Click the key to copy it</p>
   <div class="key" onclick="copy(this)">{{ key }}</div>
   <p class="hint" id="h">Click to copy</p>
   <p class="timer">⏳ Expires in {{ hours }}h {{ minutes }}m</p>
-{% else %}
-  <h1>❌ Key Not Found</h1>
-  <p class="err">This key is invalid or has expired.<br>Request a new one in our Discord.</p>
-{% endif %}
 </div>
 <script>
 function copy(el){
@@ -198,6 +233,29 @@ function copy(el){
   setTimeout(()=>h.textContent='Click to copy',2000);
 }
 </script>
+</body>
+</html>"""
+
+
+ERROR_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Key Not Found</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d14;font-family:'Segoe UI',sans-serif;color:#e2e2e2}
+.card{background:#16161f;border:1px solid #2a2a3d;border-radius:16px;padding:44px 52px;text-align:center;max-width:480px;width:92%}
+h1{font-size:22px;margin-bottom:8px;color:#fff}
+.err{color:#f04747;font-size:15px;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>❌ Key Not Found</h1>
+  <p class="err">This key is invalid or has expired.<br>Request a new one in our Discord.</p>
+</div>
 </body>
 </html>"""
 
