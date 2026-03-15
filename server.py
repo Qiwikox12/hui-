@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string, redirect
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import uuid
 import time
 import os
@@ -10,15 +11,21 @@ load_dotenv()
 app = Flask(__name__)
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "changeme")
+DATABASE_URL = os.getenv("DATABASE_URL")
 KEY_TTL = 86400
-DB_PATH = "keys.db"
+
+
+def get_db():
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS keys (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            id         SERIAL PRIMARY KEY,
             key        TEXT UNIQUE NOT NULL,
             label      TEXT DEFAULT '',
             ip         TEXT NOT NULL DEFAULT '',
@@ -27,7 +34,7 @@ def init_db():
             expires_at INTEGER NOT NULL
         )
     """)
-    conn.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS pass_tokens (
             token      TEXT PRIMARY KEY,
             ip         TEXT NOT NULL,
@@ -35,22 +42,17 @@ def init_db():
         )
     """)
     conn.commit()
+    cur.close()
     conn.close()
-
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
 
 
 def cleanup_expired():
     conn = get_db()
-    conn.execute("DELETE FROM keys WHERE expires_at < ?", (int(time.time()),))
-    conn.execute("DELETE FROM pass_tokens WHERE expires_at < ?", (int(time.time()),))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM keys WHERE expires_at < %s", (int(time.time()),))
+    cur.execute("DELETE FROM pass_tokens WHERE expires_at < %s", (int(time.time()),))
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -62,32 +64,31 @@ def make_key():
     return "-".join(uuid.uuid4().hex[:4].upper() for _ in range(4))
 
 
-# ── Public routes ────────────────────────────────────────────────────────────
+# ── Public routes ─────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
     ip = get_ip()
     cleanup_expired()
     conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM keys WHERE ip=? AND expires_at>?",
-        (ip, int(time.time()))
-    ).fetchone()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM keys WHERE ip=%s AND expires_at>%s", (ip, int(time.time())))
+    row = cur.fetchone()
     if row:
         remaining = row["expires_at"] - int(time.time())
-        conn.close()
+        cur.close(); conn.close()
         return render_template_string(KEY_PAGE,
             key=row["key"],
             hours=remaining // 3600,
             minutes=(remaining % 3600) // 60
         )
     pt = uuid.uuid4().hex
-    conn.execute(
-        "INSERT INTO pass_tokens (token, ip, expires_at) VALUES (?,?,?)",
+    cur.execute(
+        "INSERT INTO pass_tokens (token, ip, expires_at) VALUES (%s,%s,%s)",
         (pt, ip, int(time.time()) + 900)
     )
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
     return render_template_string(LANDING_PAGE, pt=pt)
 
 
@@ -95,22 +96,25 @@ def index():
 def get_key(pt):
     ip = get_ip()
     conn = get_db()
-    pt_row = conn.execute(
-        "SELECT * FROM pass_tokens WHERE token=? AND ip=? AND expires_at>?",
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT * FROM pass_tokens WHERE token=%s AND ip=%s AND expires_at>%s",
         (pt, ip, int(time.time()))
-    ).fetchone()
+    )
+    pt_row = cur.fetchone()
     if not pt_row:
-        conn.close()
+        cur.close(); conn.close()
         return render_template_string(ERROR_PAGE)
-    conn.execute("DELETE FROM pass_tokens WHERE token=?", (pt,))
+    cur.execute("DELETE FROM pass_tokens WHERE token=%s", (pt,))
+    conn.commit()
     cleanup_expired()
-    row = conn.execute(
-        "SELECT * FROM keys WHERE ip=? AND expires_at>?",
-        (ip, int(time.time()))
-    ).fetchone()
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM keys WHERE ip=%s AND expires_at>%s", (ip, int(time.time())))
+    row = cur.fetchone()
     if row:
         remaining = row["expires_at"] - int(time.time())
-        conn.close()
+        cur.close(); conn.close()
         return render_template_string(KEY_PAGE,
             key=row["key"],
             hours=remaining // 3600,
@@ -118,12 +122,12 @@ def get_key(pt):
         )
     key = make_key()
     now = int(time.time())
-    conn.execute(
-        "INSERT INTO keys (key, ip, pt, created_at, expires_at) VALUES (?,?,?,?,?)",
+    cur.execute(
+        "INSERT INTO keys (key, ip, pt, created_at, expires_at) VALUES (%s,%s,%s,%s,%s)",
         (key, ip, pt, now, now + KEY_TTL)
     )
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
     return render_template_string(KEY_PAGE, key=key, hours=23, minutes=59)
 
 
@@ -135,17 +139,16 @@ def verify():
         return jsonify({"valid": False}), 400
     cleanup_expired()
     conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM keys WHERE key=? AND expires_at>?",
-        (key, int(time.time()))
-    ).fetchone()
-    conn.close()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM keys WHERE key=%s AND expires_at>%s", (key, int(time.time())))
+    row = cur.fetchone()
+    cur.close(); conn.close()
     if not row:
         return jsonify({"valid": False})
     return jsonify({"valid": True})
 
 
-# ── Admin routes ─────────────────────────────────────────────────────────────
+# ── Admin routes ──────────────────────────────────────────────────────────────
 
 def admin_auth():
     return request.args.get("s") == ADMIN_SECRET or request.form.get("s") == ADMIN_SECRET
@@ -157,20 +160,20 @@ def admin():
         return "Forbidden", 403
     cleanup_expired()
     conn = get_db()
-    rows = conn.execute("SELECT * FROM keys ORDER BY created_at DESC").fetchall()
-    conn.close()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM keys ORDER BY created_at DESC")
+    rows = cur.fetchall()
+    cur.close(); conn.close()
     now = int(time.time())
     keys = [{
         "id": r["id"],
         "key": r["key"],
         "label": r["label"] or "",
         "ip": r["ip"] or "—",
-        "expires_at": r["expires_at"],
         "expires_h": max(0, r["expires_at"] - now) // 3600,
         "expires_m": (max(0, r["expires_at"] - now) % 3600) // 60,
     } for r in rows]
-    s = ADMIN_SECRET
-    return render_template_string(ADMIN_PAGE, keys=keys, s=s, total=len(keys))
+    return render_template_string(ADMIN_PAGE, keys=keys, s=ADMIN_SECRET, total=len(keys))
 
 
 @app.route("/admin/delete/<int:key_id>", methods=["POST"])
@@ -178,9 +181,10 @@ def admin_delete(key_id):
     if not admin_auth():
         return "Forbidden", 403
     conn = get_db()
-    conn.execute("DELETE FROM keys WHERE id=?", (key_id,))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM keys WHERE id=%s", (key_id,))
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
     return redirect(f"/admin?s={ADMIN_SECRET}")
 
 
@@ -189,9 +193,10 @@ def admin_delete_all():
     if not admin_auth():
         return "Forbidden", 403
     conn = get_db()
-    conn.execute("DELETE FROM keys")
+    cur = conn.cursor()
+    cur.execute("DELETE FROM keys")
     conn.commit()
-    conn.close()
+    cur.close(); conn.close()
     return redirect(f"/admin?s={ADMIN_SECRET}")
 
 
@@ -207,15 +212,16 @@ def admin_create():
     now = int(time.time())
     expires = now + days * 86400
     conn = get_db()
+    cur = conn.cursor()
     try:
-        conn.execute(
-            "INSERT INTO keys (key, label, ip, pt, created_at, expires_at) VALUES (?,?,?,?,?,?)",
+        cur.execute(
+            "INSERT INTO keys (key, label, ip, pt, created_at, expires_at) VALUES (%s,%s,%s,%s,%s,%s)",
             (custom_key, label, "admin", "admin", now, expires)
         )
         conn.commit()
-    except sqlite3.IntegrityError:
-        pass
-    conn.close()
+    except Exception:
+        conn.rollback()
+    cur.close(); conn.close()
     return redirect(f"/admin?s={ADMIN_SECRET}")
 
 
@@ -294,8 +300,7 @@ ERROR_PAGE = """<!DOCTYPE html>
   body{margin:0;background:#fff;font-family:Arial,sans-serif;color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh}
   .box{width:360px;padding:32px;border:1px solid #ddd}
   h2{margin:0 0 8px;font-size:18px}
-  p{margin:0;font-size:13px;color:#555}
-  a{color:#111}
+  p{margin:0;font-size:13px;color:#555}a{color:#111}
 </style>
 </head>
 <body>
@@ -345,7 +350,6 @@ ADMIN_PAGE = """<!DOCTYPE html>
   <span class="stat">{{ total }} active key{{ 's' if total != 1 else '' }}</span>
 </div>
 <div class="wrap">
-
   <div class="card">
     <h3>Create key</h3>
     <form method="POST" action="/admin/create">
@@ -358,24 +362,16 @@ ADMIN_PAGE = """<!DOCTYPE html>
       </div>
     </form>
   </div>
-
   <div class="card">
-    <h3>
-      Keys
+    <h3>Keys
       <form method="POST" action="/admin/delete_all" style="display:inline;float:right">
         <input type="hidden" name="s" value="{{ s }}">
-        <button class="btn-danger" type="submit" onclick="return confirm('Delete all keys?')">Delete all</button>
+        <button class="btn-danger" type="submit" onclick="return confirm('Delete all?')">Delete all</button>
       </form>
     </h3>
     {% if keys %}
     <table>
-      <tr>
-        <th>Key</th>
-        <th>Label</th>
-        <th>IP</th>
-        <th>Expires in</th>
-        <th></th>
-      </tr>
+      <tr><th>Key</th><th>Label</th><th>IP</th><th>Expires</th><th></th></tr>
       {% for k in keys %}
       <tr>
         <td class="key-val">{{ k.key }}</td>
@@ -395,7 +391,6 @@ ADMIN_PAGE = """<!DOCTYPE html>
     <p style="color:#aaa;font-size:13px;margin:0">No active keys.</p>
     {% endif %}
   </div>
-
 </div>
 </body>
 </html>"""
