@@ -30,6 +30,14 @@ def init_db():
             redeemed   INTEGER DEFAULT 0
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pass_tokens (
+            token      TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            used       INTEGER DEFAULT 0
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -43,6 +51,7 @@ def get_db():
 def cleanup_expired():
     conn = get_db()
     conn.execute("DELETE FROM keys WHERE expires_at < ?", (int(time.time()),))
+    conn.execute("DELETE FROM pass_tokens WHERE expires_at < ?", (int(time.time()),))
     conn.commit()
     conn.close()
 
@@ -57,75 +66,72 @@ def generate():
     user_id = data.get("user_id")
     if not user_id:
         return jsonify({"success": False}), 400
+    return jsonify({
+        "success": True,
+        "url": f"{SERVER_URL}/get/{user_id}"
+    })
+
+
+@app.route("/get/<user_id>")
+def get_key(user_id):
+    # Генерируем одноразовый pass_token, живёт 15 минут
+    pt = uuid.uuid4().hex
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO pass_tokens (token, user_id, expires_at) VALUES (?,?,?)",
+        (pt, user_id, int(time.time()) + 900)
+    )
+    conn.commit()
+    conn.close()
+    return render_template_string(LANDING_PAGE, user_id=user_id, pt=pt)
+
+
+@app.route("/reveal/<user_id>")
+def reveal_key(user_id):
+    pt = request.args.get("pt", "")
+
+    # Проверяем pass_token
+    conn = get_db()
+    pt_row = conn.execute(
+        "SELECT * FROM pass_tokens WHERE token=? AND user_id=? AND expires_at>? AND used=0",
+        (pt, user_id, int(time.time()))
+    ).fetchone()
+
+    if not pt_row:
+        conn.close()
+        return render_template_string(ERROR_PAGE)
+
+    # Помечаем токен использованным (одноразовый)
+    conn.execute("UPDATE pass_tokens SET used=1 WHERE token=?", (pt,))
+    conn.commit()
 
     cleanup_expired()
-    conn = get_db()
 
-    existing = conn.execute(
-        "SELECT * FROM keys WHERE user_id=? AND expires_at>? AND redeemed=0",
+    row = conn.execute(
+        "SELECT * FROM keys WHERE user_id=? AND expires_at>?",
         (user_id, int(time.time()))
     ).fetchone()
 
-    if existing:
+    if row:
+        remaining = row["expires_at"] - int(time.time())
         conn.close()
-        return jsonify({
-            "success": True,
-            "url": f"{SERVER_URL}/get/{existing['token']}"
-        })
+        return render_template_string(
+            KEY_PAGE,
+            key=row["key"],
+            hours=remaining // 3600,
+            minutes=(remaining % 3600) // 60
+        )
 
     key = make_key()
     token = uuid.uuid4().hex
     now = int(time.time())
-
     conn.execute(
         "INSERT INTO keys (key, user_id, token, created_at, expires_at) VALUES (?,?,?,?,?)",
         (key, user_id, token, now, now + KEY_TTL)
     )
     conn.commit()
     conn.close()
-
-    return jsonify({
-        "success": True,
-        "url": f"{SERVER_URL}/get/{token}"
-    })
-
-
-@app.route("/get/<token>")
-def get_key(token):
-    cleanup_expired()
-    conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM keys WHERE token=? AND expires_at>?",
-        (token, int(time.time()))
-    ).fetchone()
-    conn.close()
-
-    if not row:
-        return render_template_string(ERROR_PAGE)
-
-    return render_template_string(LANDING_PAGE, token=token)
-
-
-@app.route("/reveal/<token>")
-def reveal_key(token):
-    cleanup_expired()
-    conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM keys WHERE token=? AND expires_at>?",
-        (token, int(time.time()))
-    ).fetchone()
-    conn.close()
-
-    if not row:
-        return render_template_string(ERROR_PAGE)
-
-    remaining = row["expires_at"] - int(time.time())
-    return render_template_string(
-        KEY_PAGE,
-        key=row["key"],
-        hours=remaining // 3600,
-        minutes=(remaining % 3600) // 60
-    )
+    return render_template_string(KEY_PAGE, key=key, hours=23, minutes=59)
 
 
 @app.route("/verify", methods=["POST"])
@@ -146,8 +152,6 @@ def verify():
         conn.close()
         return jsonify({"valid": False})
 
-    conn.execute("UPDATE keys SET redeemed=1 WHERE key=?", (key,))
-    conn.commit()
     conn.close()
     return jsonify({"valid": True, "user_id": row["user_id"]})
 
@@ -192,7 +196,7 @@ h1{font-size:22px;margin-bottom:8px;color:#fff}
 <div class="card">
   <h1>🔑 Get Your Key</h1>
   <p class="sub">Complete a short task to receive your key.<br>It will be valid for 24 hours.</p>
-  <a class="btn" href="/reveal/{{ token }}">Get Key</a>
+  <a class="btn" href="/reveal/{{ user_id }}?pt={{ pt }}">Get Key</a>
   <p class="note">You will be redirected through a short verification.</p>
 </div>
 </body>
