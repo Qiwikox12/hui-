@@ -236,13 +236,13 @@ LANDING_PAGE = """<!DOCTYPE html>
 <script src="https://publisher.linkvertise.com/cdn/linkvertise.js"></script>
 <script>linkvertise(4260771, {whitelist: [], blacklist: [""]});</script>
 <style>
-  body{margin:0;background:#fff;font-family:Arial,sans-serif;color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh}
-  .box{width:360px;padding:32px;border:1px solid #ddd}
-  h2{margin:0 0 6px;font-size:18px}
-  p{margin:0 0 24px;font-size:13px;color:#555;line-height:1.5}
-  a.btn{display:block;background:#111;color:#fff;text-align:center;padding:11px;font-size:14px;text-decoration:none}
-  a.btn:hover{background:#333}
-  .note{margin:12px 0 0;font-size:12px;color:#aaa;text-align:center}
+  body{margin:0;background:#0a0a0a;font-family:Arial,sans-serif;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .box{width:360px;padding:32px;border:1px solid #222}
+  h2{margin:0 0 6px;font-size:18px;color:#fff}
+  p{margin:0 0 24px;font-size:13px;color:#888;line-height:1.5}
+  a.btn{display:block;background:#fff;color:#000;text-align:center;padding:11px;font-size:14px;text-decoration:none;font-weight:bold}
+  a.btn:hover{background:#ddd}
+  .note{margin:12px 0 0;font-size:12px;color:#444;text-align:center}
 </style>
 </head>
 <body>
@@ -262,14 +262,14 @@ KEY_PAGE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Your Key</title>
 <style>
-  body{margin:0;background:#fff;font-family:Arial,sans-serif;color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh}
-  .box{width:360px;padding:32px;border:1px solid #ddd}
-  h2{margin:0 0 6px;font-size:18px}
-  p{margin:0 0 16px;font-size:13px;color:#555}
-  .key{font-family:'Courier New',monospace;font-size:20px;letter-spacing:3px;background:#f5f5f5;border:1px solid #ccc;padding:14px 16px;cursor:pointer;user-select:all;margin-bottom:8px}
-  .key:hover{background:#eee}
-  .hint{font-size:12px;color:#aaa;margin:0 0 16px}
-  .timer{font-size:12px;color:#888;border-top:1px solid #eee;padding-top:14px;margin:0}
+  body{margin:0;background:#0a0a0a;font-family:Arial,sans-serif;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .box{width:360px;padding:32px;border:1px solid #222}
+  h2{margin:0 0 6px;font-size:18px;color:#fff}
+  p{margin:0 0 16px;font-size:13px;color:#888}
+  .key{font-family:'Courier New',monospace;font-size:20px;letter-spacing:3px;background:#111;border:1px solid #333;color:#fff;padding:14px 16px;cursor:pointer;user-select:all;margin-bottom:8px}
+  .key:hover{background:#1a1a1a}
+  .hint{font-size:12px;color:#444;margin:0 0 16px}
+  .timer{font-size:12px;color:#555;border-top:1px solid #1e1e1e;padding-top:14px;margin:0}
 </style>
 </head>
 <body>
@@ -297,10 +297,10 @@ ERROR_PAGE = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Error</title>
 <style>
-  body{margin:0;background:#fff;font-family:Arial,sans-serif;color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh}
-  .box{width:360px;padding:32px;border:1px solid #ddd}
-  h2{margin:0 0 8px;font-size:18px}
-  p{margin:0;font-size:13px;color:#555}a{color:#111}
+  body{margin:0;background:#0a0a0a;font-family:Arial,sans-serif;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .box{width:360px;padding:32px;border:1px solid #222}
+  h2{margin:0 0 8px;font-size:18px;color:#fff}
+  p{margin:0;font-size:13px;color:#888}a{color:#fff}
 </style>
 </head>
 <body>
@@ -319,29 +319,30 @@ ADMIN_PAGE = """<!DOCTYPE html>
 <title>Admin</title>
 <style>
   *{box-sizing:border-box}
-  body{margin:0;font-family:Arial,sans-serif;font-size:14px;background:#f7f7f7;color:#111}
-  .top{background:#fff;border-bottom:1px solid #ddd;padding:14px 24px;display:flex;align-items:center;gap:16px}
-  .top h1{margin:0;font-size:16px;font-weight:bold}
+  body{margin:0;font-family:Arial,sans-serif;font-size:14px;background:#0a0a0a;color:#e0e0e0}
+  .top{background:#111;border-bottom:1px solid #222;padding:14px 24px;display:flex;align-items:center;gap:16px}
+  .top h1{margin:0;font-size:16px;font-weight:bold;color:#fff}
   .stat{font-size:13px;color:#555}
   .wrap{padding:24px}
-  .card{background:#fff;border:1px solid #ddd;padding:20px;margin-bottom:20px}
-  .card h3{margin:0 0 14px;font-size:14px;font-weight:bold}
+  .card{background:#111;border:1px solid #222;padding:20px;margin-bottom:20px}
+  .card h3{margin:0 0 14px;font-size:14px;font-weight:bold;color:#fff}
   table{width:100%;border-collapse:collapse}
-  th{text-align:left;font-size:12px;color:#888;font-weight:normal;padding:6px 8px;border-bottom:1px solid #eee}
-  td{padding:7px 8px;border-bottom:1px solid #f0f0f0;font-size:13px}
+  th{text-align:left;font-size:12px;color:#444;font-weight:normal;padding:6px 8px;border-bottom:1px solid #1e1e1e}
+  td{padding:7px 8px;border-bottom:1px solid #161616;font-size:13px;color:#ccc}
   tr:last-child td{border-bottom:none}
-  .key-val{font-family:'Courier New',monospace;font-size:13px}
-  .label{display:inline-block;background:#f0f0f0;padding:2px 7px;font-size:11px}
+  .key-val{font-family:'Courier New',monospace;font-size:13px;color:#fff}
+  .label{display:inline-block;background:#1e1e1e;color:#aaa;padding:2px 7px;font-size:11px}
   form{display:inline}
   .del{background:none;border:none;color:#c00;cursor:pointer;font-size:12px;padding:0}
   .del:hover{text-decoration:underline}
   .form-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
-  input[type=text],input[type=number]{border:1px solid #ccc;padding:7px 10px;font-size:13px;width:160px}
+  input[type=text],input[type=number]{background:#0a0a0a;border:1px solid #333;color:#e0e0e0;padding:7px 10px;font-size:13px;width:160px}
   input[type=number]{width:70px}
-  .btn-create{background:#111;color:#fff;border:none;padding:8px 16px;cursor:pointer;font-size:13px}
-  .btn-create:hover{background:#333}
-  .btn-danger{background:#fff;color:#c00;border:1px solid #c00;padding:7px 14px;cursor:pointer;font-size:13px}
-  .btn-danger:hover{background:#fff0f0}
+  input::placeholder{color:#444}
+  .btn-create{background:#fff;color:#000;border:none;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:bold}
+  .btn-create:hover{background:#ddd}
+  .btn-danger{background:transparent;color:#c00;border:1px solid #c00;padding:7px 14px;cursor:pointer;font-size:13px}
+  .btn-danger:hover{background:#1a0000}
 </style>
 </head>
 <body>
@@ -388,7 +389,7 @@ ADMIN_PAGE = """<!DOCTYPE html>
       {% endfor %}
     </table>
     {% else %}
-    <p style="color:#aaa;font-size:13px;margin:0">No active keys.</p>
+    <p style="color:#333;font-size:13px;margin:0">No active keys.</p>
     {% endif %}
   </div>
 </div>
