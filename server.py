@@ -38,6 +38,13 @@ def init_db():
             used       INTEGER DEFAULT 0
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ip_cache (
+            ip         TEXT PRIMARY KEY,
+            key        TEXT NOT NULL,
+            expires_at INTEGER NOT NULL
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -52,8 +59,13 @@ def cleanup_expired():
     conn = get_db()
     conn.execute("DELETE FROM keys WHERE expires_at < ?", (int(time.time()),))
     conn.execute("DELETE FROM pass_tokens WHERE expires_at < ?", (int(time.time()),))
+    conn.execute("DELETE FROM ip_cache WHERE expires_at < ?", (int(time.time()),))
     conn.commit()
     conn.close()
+
+
+def get_ip():
+    return request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
 
 
 def make_key():
@@ -74,8 +86,30 @@ def generate():
 
 @app.route("/get/<user_id>")
 def get_key(user_id):
-    pt = uuid.uuid4().hex
+    ip = get_ip()
+    cleanup_expired()
     conn = get_db()
+
+    # Если с этого IP уже есть действующий ключ — сразу показываем
+    cached = conn.execute(
+        "SELECT * FROM ip_cache WHERE ip=? AND expires_at>?",
+        (ip, int(time.time()))
+    ).fetchone()
+    if cached:
+        row = conn.execute(
+            "SELECT * FROM keys WHERE key=? AND expires_at>?",
+            (cached["key"], int(time.time()))
+        ).fetchone()
+        if row:
+            remaining = row["expires_at"] - int(time.time())
+            conn.close()
+            return render_template_string(KEY_PAGE,
+                key=row["key"],
+                hours=remaining // 3600,
+                minutes=(remaining % 3600) // 60
+            )
+
+    pt = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO pass_tokens (token, user_id, expires_at) VALUES (?,?,?)",
         (pt, user_id, int(time.time()) + 900)
@@ -87,6 +121,7 @@ def get_key(user_id):
 
 @app.route("/reveal/<user_id>/<pt>")
 def reveal_key(user_id, pt):
+    ip = get_ip()
     conn = get_db()
     pt_row = conn.execute(
         "SELECT * FROM pass_tokens WHERE token=? AND user_id=? AND expires_at>?",
@@ -106,24 +141,28 @@ def reveal_key(user_id, pt):
 
     if row:
         remaining = row["expires_at"] - int(time.time())
-        conn.close()
-        return render_template_string(
-            KEY_PAGE,
-            key=row["key"],
-            hours=remaining // 3600,
-            minutes=(remaining % 3600) // 60
+        key = row["key"]
+        hours = remaining // 3600
+        minutes = (remaining % 3600) // 60
+    else:
+        key = make_key()
+        token = uuid.uuid4().hex
+        now = int(time.time())
+        conn.execute(
+            "INSERT INTO keys (key, user_id, token, created_at, expires_at) VALUES (?,?,?,?,?)",
+            (key, user_id, token, now, now + KEY_TTL)
         )
+        conn.commit()
+        hours, minutes = 23, 59
 
-    key = make_key()
-    token = uuid.uuid4().hex
-    now = int(time.time())
+    # Сохраняем IP → ключ
     conn.execute(
-        "INSERT INTO keys (key, user_id, token, created_at, expires_at) VALUES (?,?,?,?,?)",
-        (key, user_id, token, now, now + KEY_TTL)
+        "INSERT OR REPLACE INTO ip_cache (ip, key, expires_at) VALUES (?,?,?)",
+        (ip, key, int(time.time()) + KEY_TTL)
     )
     conn.commit()
     conn.close()
-    return render_template_string(KEY_PAGE, key=key, hours=23, minutes=59)
+    return render_template_string(KEY_PAGE, key=key, hours=hours, minutes=minutes)
 
 
 @app.route("/verify", methods=["POST"])
@@ -170,26 +209,25 @@ LANDING_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Get Key</title>
+<title>Key System</title>
 <script src="https://publisher.linkvertise.com/cdn/linkvertise.js"></script>
 <script>linkvertise(4260771, {whitelist: [], blacklist: [""]});</script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d14;font-family:'Segoe UI',sans-serif;color:#e2e2e2}
-.card{background:#16161f;border:1px solid #2a2a3d;border-radius:16px;padding:44px 52px;text-align:center;max-width:480px;width:92%}
-h1{font-size:22px;margin-bottom:8px;color:#fff}
-.sub{font-size:14px;color:#777;margin-bottom:32px}
-.btn{display:inline-block;background:#5865f2;color:#fff;text-decoration:none;font-size:16px;font-weight:600;padding:14px 36px;border-radius:10px;transition:background .15s}
-.btn:hover{background:#4752c4}
-.note{font-size:12px;color:#555;margin-top:20px}
+  body { margin: 0; background: #fff; font-family: Arial, sans-serif; color: #111; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .box { width: 360px; padding: 32px; border: 1px solid #ddd; }
+  h2 { margin: 0 0 6px; font-size: 18px; font-weight: bold; }
+  p { margin: 0 0 24px; font-size: 13px; color: #555; line-height: 1.5; }
+  a.btn { display: block; background: #111; color: #fff; text-align: center; padding: 11px; font-size: 14px; text-decoration: none; }
+  a.btn:hover { background: #333; }
+  .note { margin: 12px 0 0; font-size: 12px; color: #aaa; text-align: center; }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>🔑 Get Your Key</h1>
-  <p class="sub">Complete a short task to receive your key.<br>It will be valid for 24 hours.</p>
-  <a class="btn" href="/reveal/{{ user_id }}/{{ pt }}">Get Key</a>
-  <p class="note">You will be redirected through a short verification.</p>
+<div class="box">
+  <h2>Get your key</h2>
+  <p>Complete a short task to receive your 24-hour key.<br>You only need to do this once per day.</p>
+  <a class="btn" href="/reveal/{{ user_id }}/{{ pt }}">Continue</a>
+  <p class="note">Redirects through a verification step</p>
 </div>
 </body>
 </html>"""
@@ -202,31 +240,30 @@ KEY_PAGE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Your Key</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d14;font-family:'Segoe UI',sans-serif;color:#e2e2e2}
-.card{background:#16161f;border:1px solid #2a2a3d;border-radius:16px;padding:44px 52px;text-align:center;max-width:480px;width:92%}
-h1{font-size:22px;margin-bottom:8px;color:#fff}
-.sub{font-size:14px;color:#777;margin-bottom:32px}
-.key{background:#0d0d14;border:1px solid #5865f2;border-radius:10px;padding:18px 24px;font-family:'Courier New',monospace;font-size:26px;letter-spacing:5px;color:#5865f2;cursor:pointer;transition:background .15s;margin-bottom:12px;user-select:all}
-.key:hover{background:#13131e}
-.hint{font-size:13px;color:#555;margin-bottom:20px}
-.timer{font-size:13px;color:#f0b429}
+  body { margin: 0; background: #fff; font-family: Arial, sans-serif; color: #111; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .box { width: 360px; padding: 32px; border: 1px solid #ddd; }
+  h2 { margin: 0 0 6px; font-size: 18px; font-weight: bold; }
+  p { margin: 0 0 16px; font-size: 13px; color: #555; }
+  .key { font-family: 'Courier New', monospace; font-size: 20px; letter-spacing: 3px; background: #f5f5f5; border: 1px solid #ccc; padding: 14px 16px; cursor: pointer; user-select: all; margin-bottom: 8px; }
+  .key:hover { background: #eee; }
+  .hint { font-size: 12px; color: #aaa; margin: 0 0 16px; }
+  .timer { font-size: 12px; color: #888; border-top: 1px solid #eee; padding-top: 14px; margin: 0; }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>🔑 Your Key</h1>
-  <p class="sub">Click the key to copy it</p>
-  <div class="key" onclick="copy(this)">{{ key }}</div>
-  <p class="hint" id="h">Click to copy</p>
-  <p class="timer">⏳ Expires in {{ hours }}h {{ minutes }}m</p>
+<div class="box">
+  <h2>Your key</h2>
+  <p>Click to copy, then paste it into the script.</p>
+  <div class="key" onclick="copyKey(this)">{{ key }}</div>
+  <p class="hint" id="h">click to copy</p>
+  <p class="timer">Expires in {{ hours }}h {{ minutes }}m</p>
 </div>
 <script>
-function copy(el){
+function copyKey(el) {
   navigator.clipboard.writeText(el.textContent.trim());
-  var h=document.getElementById('h');
-  h.textContent='✅ Copied!';
-  setTimeout(()=>h.textContent='Click to copy',2000);
+  var h = document.getElementById('h');
+  h.textContent = 'copied!';
+  setTimeout(function(){ h.textContent = 'click to copy'; }, 2000);
 }
 </script>
 </body>
@@ -238,19 +275,18 @@ ERROR_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Key Not Found</title>
+<title>Error</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d14;font-family:'Segoe UI',sans-serif;color:#e2e2e2}
-.card{background:#16161f;border:1px solid #2a2a3d;border-radius:16px;padding:44px 52px;text-align:center;max-width:480px;width:92%}
-h1{font-size:22px;margin-bottom:8px;color:#fff}
-.err{color:#f04747;font-size:15px;margin-top:12px}
+  body { margin: 0; background: #fff; font-family: Arial, sans-serif; color: #111; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .box { width: 360px; padding: 32px; border: 1px solid #ddd; }
+  h2 { margin: 0 0 8px; font-size: 18px; }
+  p { margin: 0; font-size: 13px; color: #555; line-height: 1.6; }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>❌ Key Not Found</h1>
-  <p class="err">This key is invalid or has expired.<br>Request a new one in our Discord.</p>
+<div class="box">
+  <h2>Link expired</h2>
+  <p>This link is no longer valid. Request a new one from the Discord bot.</p>
 </div>
 </body>
 </html>"""
