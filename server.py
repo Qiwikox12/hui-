@@ -74,7 +74,6 @@ def generate():
 
 @app.route("/get/<user_id>")
 def get_key(user_id):
-    # Генерируем одноразовый pass_token, живёт 15 минут
     pt = uuid.uuid4().hex
     conn = get_db()
     conn.execute(
@@ -86,24 +85,17 @@ def get_key(user_id):
     return render_template_string(LANDING_PAGE, user_id=user_id, pt=pt)
 
 
-@app.route("/reveal/<user_id>")
-def reveal_key(user_id):
-    pt = request.args.get("pt", "")
-
-    # Проверяем pass_token
+@app.route("/reveal/<user_id>/<pt>")
+def reveal_key(user_id, pt):
     conn = get_db()
     pt_row = conn.execute(
-        "SELECT * FROM pass_tokens WHERE token=? AND user_id=? AND expires_at>? AND used=0",
+        "SELECT * FROM pass_tokens WHERE token=? AND user_id=? AND expires_at>?",
         (pt, user_id, int(time.time()))
     ).fetchone()
 
     if not pt_row:
         conn.close()
         return render_template_string(ERROR_PAGE)
-
-    # Помечаем токен использованным (одноразовый)
-    conn.execute("UPDATE pass_tokens SET used=1 WHERE token=?", (pt,))
-    conn.commit()
 
     cleanup_expired()
 
@@ -196,7 +188,7 @@ h1{font-size:22px;margin-bottom:8px;color:#fff}
 <div class="card">
   <h1>🔑 Get Your Key</h1>
   <p class="sub">Complete a short task to receive your key.<br>It will be valid for 24 hours.</p>
-  <a class="btn" href="/reveal/{{ user_id }}?pt={{ pt }}">Get Key</a>
+  <a class="btn" href="/reveal/{{ user_id }}/{{ pt }}">Get Key</a>
   <p class="note">You will be redirected through a short verification.</p>
 </div>
 </body>
